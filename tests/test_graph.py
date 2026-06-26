@@ -54,11 +54,21 @@ def test_general_question_can_skip_tools(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     model = ToolCallingFakeModel(responses=[AIMessage(content="普通回答")])
+    progress_messages: list[str] = []
 
-    result = run_agent("Python 是什么？", _config(vault), model=model)
+    result = run_agent(
+        "Python 是什么？",
+        _config(vault),
+        model=model,
+        progress=progress_messages.append,
+    )
 
     assert result["final_answer"] == "普通回答"
     assert result["tool_calls"] == []
+    assert progress_messages == [
+        "识别为普通问题，直接生成回答。",
+        "正在生成最终回答。",
+    ]
 
 
 def test_search_failure_retries_without_infinite_loop(tmp_path):

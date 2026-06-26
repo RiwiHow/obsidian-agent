@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Callable, Literal, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -33,7 +33,14 @@ def create_chat_model(config: AppConfig) -> ChatOpenAI:
     )
 
 
-def build_graph(config: AppConfig, model: BaseChatModel | None = None):
+ProgressCallback = Callable[[str], None]
+
+
+def build_graph(
+    config: AppConfig,
+    model: BaseChatModel | None = None,
+    progress: ProgressCallback | None = None,
+):
     note_tools = create_note_tools(
         config.vault_path,
         max_results=config.search.max_results,
@@ -51,6 +58,11 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
             search_query = f"{question} Obsidian markdown note"
 
         needs_tool = _looks_like_vault_question(question)
+        if progress:
+            if needs_tool:
+                progress("识别为笔记问题，准备搜索 Obsidian vault。")
+            else:
+                progress("识别为普通问题，直接生成回答。")
         return {
             "needs_tool": needs_tool,
             "search_query": search_query,
@@ -58,6 +70,8 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
         }
 
     def search_node(state: AgentState) -> dict[str, Any]:
+        if progress:
+            progress(f"正在搜索笔记：{state['search_query']}")
         messages = [
             SystemMessage(
                 content=(
@@ -93,6 +107,13 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
             tool_messages.append(ToolMessage(content=str(result), tool_call_id=call.get("id", name)))
             recorded_calls.append({"name": name, "args": args, "result_count": len(result)})
 
+        if progress:
+            count = len(search_results)
+            if count:
+                progress(f"找到 {count} 条相关笔记，准备读取内容。")
+            else:
+                progress("没有找到相关笔记，尝试调整查询。")
+
         return {
             "search_results": search_results,
             "selected_files": [item["file_path"] for item in search_results],
@@ -104,8 +125,15 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
     def read_node(state: AgentState) -> dict[str, Any]:
         notes_content: list[dict[str, str]] = []
         recorded_calls: list[dict[str, Any]] = []
+        selected_files = state.get("selected_files", [])
 
-        for file_path in state.get("selected_files", []):
+        if progress:
+            if selected_files:
+                progress(f"正在读取 {len(selected_files)} 篇笔记。")
+            else:
+                progress("没有可读取的笔记，准备基于现有信息回答。")
+
+        for file_path in selected_files:
             result = tool_by_name["read_note"].invoke({"file_path": file_path})
             notes_content.append(result)
             recorded_calls.append({"name": "read_note", "args": {"file_path": file_path}})
@@ -116,6 +144,8 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
         }
 
     def summarize_node(state: AgentState) -> dict[str, str]:
+        if progress:
+            progress("正在生成最终回答。")
         notes = state.get("notes_content", [])
         if notes:
             context = "\n\n".join(
@@ -168,8 +198,13 @@ def build_graph(config: AppConfig, model: BaseChatModel | None = None):
     return graph.compile()
 
 
-def run_agent(question: str, config: AppConfig, model: BaseChatModel | None = None) -> AgentState:
-    graph = build_graph(config, model=model)
+def run_agent(
+    question: str,
+    config: AppConfig,
+    model: BaseChatModel | None = None,
+    progress: ProgressCallback | None = None,
+) -> AgentState:
+    graph = build_graph(config, model=model, progress=progress)
     return graph.invoke(
         {
             "question": question,

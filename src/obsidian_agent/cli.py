@@ -23,7 +23,10 @@ def main(argv: list[str] | None = None) -> int:
         print("model.api_key is not set in config.yaml and DEEPSEEK_API_KEY is not set.", file=sys.stderr)
         return 2
 
-    result = run_agent(args.question, config)
+    def show_progress(message: str) -> None:
+        print(f"[obsidian-agent] {message}", file=sys.stderr)
+
+    result = run_agent(args.question, config, progress=show_progress)
     print(result.get("final_answer", ""))
 
     if args.show_tools:
