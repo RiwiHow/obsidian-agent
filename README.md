@@ -1,16 +1,15 @@
 # AI Obsidian Agent
 
-Read-only CLI agent that searches Markdown files in an Obsidian vault and summarizes answers with DeepSeek, LangChain tool calling, and LangGraph.
+Read-only CLI agent that retrieves relevant Markdown chunks from an Obsidian vault with local RAG, then summarizes answers with DeepSeek, LangChain tool calling, and LangGraph.
 
 ## Setup
 
 ```powershell
 uv sync
 Copy-Item config.example.yaml config.yaml
-$env:DEEPSEEK_API_KEY = "your-api-key"
 ```
 
-Edit `config.yaml` so `vault_path` points to your Obsidian vault.
+Edit `config.yaml` so `vault_path` points to your Obsidian vault and `model.api_key` contains your DeepSeek API key.
 
 ## Run
 

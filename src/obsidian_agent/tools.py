@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from langchain_core.tools import tool
 
-
-@dataclass(frozen=True)
-class NoteSearchResult:
-    file_path: str
-    snippet: str
+from obsidian_agent.rag import retrieve_notes_from_vault
 
 
 def _resolve_vault(vault_path: str | Path) -> Path:
@@ -41,37 +37,6 @@ def _safe_note_path(vault_path: str | Path, file_path: str | Path) -> Path:
     return resolved
 
 
-def search_notes_in_vault(
-    vault_path: str | Path,
-    query: str,
-    max_results: int = 5,
-) -> list[dict[str, str]]:
-    terms = [term.casefold() for term in query.split() if term.strip()]
-    if not terms:
-        return []
-
-    vault = _resolve_vault(vault_path)
-    results: list[NoteSearchResult] = []
-
-    for note_path in _markdown_files(vault):
-        relative_path = _relative_posix(note_path, vault)
-        try:
-            content = note_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            content = note_path.read_text(encoding="utf-8", errors="ignore")
-
-        haystack = f"{relative_path}\n{content}".casefold()
-        if not all(term in haystack for term in terms):
-            continue
-
-        snippet = _build_snippet(relative_path, content, terms)
-        results.append(NoteSearchResult(file_path=relative_path, snippet=snippet))
-        if len(results) >= max_results:
-            break
-
-    return [result.__dict__ for result in results]
-
-
 def read_note_from_vault(vault_path: str | Path, file_path: str | Path) -> dict[str, str]:
     vault = _resolve_vault(vault_path)
     note_path = _safe_note_path(vault, file_path)
@@ -84,11 +49,24 @@ def list_notes_in_vault(vault_path: str | Path) -> list[str]:
     return [_relative_posix(path, vault) for path in _markdown_files(vault)]
 
 
-def create_note_tools(vault_path: str | Path, max_results: int = 5):
+def create_note_tools(
+    vault_path: str | Path,
+    max_results: int = 5,
+    chunk_size: int = 1200,
+    chunk_overlap: int = 200,
+):
     @tool
-    def search_notes(query: str) -> list[dict[str, str]]:
-        """Search Markdown notes by local keyword matching. Returns file_path and snippet."""
-        return search_notes_in_vault(vault_path, query, max_results=max_results)
+    def retrieve_notes(query: str) -> list[dict[str, Any]]:
+        """Retrieve relevant Markdown chunks from the Obsidian vault for RAG."""
+        return retrieve_notes_from_vault(
+            vault_path,
+            query,
+            max_results=max_results,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            markdown_files=_markdown_files,
+            relative_path=_relative_posix,
+        )
 
     @tool
     def read_note(file_path: str) -> dict[str, str]:
@@ -100,19 +78,4 @@ def create_note_tools(vault_path: str | Path, max_results: int = 5):
         """List Markdown notes in the configured Obsidian vault. Useful for debugging."""
         return list_notes_in_vault(vault_path)
 
-    return [search_notes, read_note, list_notes]
-
-
-def _build_snippet(relative_path: str, content: str, terms: list[str], radius: int = 90) -> str:
-    folded = content.casefold()
-    positions = [folded.find(term) for term in terms if folded.find(term) >= 0]
-    if not positions:
-        return relative_path
-
-    first = min(positions)
-    start = max(first - radius, 0)
-    end = min(first + radius, len(content))
-    snippet = content[start:end].replace("\r", " ").replace("\n", " ").strip()
-    prefix = "..." if start > 0 else ""
-    suffix = "..." if end < len(content) else ""
-    return f"{prefix}{snippet}{suffix}"
+    return [retrieve_notes, read_note, list_notes]

@@ -7,3 +7,5 @@ model:
 search:
   max_results: 5
   max_search_iterations: 2
+  chunk_size: 1200
+  chunk_overlap: 200

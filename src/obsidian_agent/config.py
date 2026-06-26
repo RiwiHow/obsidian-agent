@@ -27,6 +27,8 @@ class ModelConfig(BaseModel):
 class SearchConfig(BaseModel):
     max_results: int = Field(default=5, ge=1)
     max_search_iterations: int = Field(default=2, ge=1)
+    chunk_size: int = Field(default=1200, ge=200)
+    chunk_overlap: int = Field(default=200, ge=0)
 
 
 class AppConfig(BaseModel):

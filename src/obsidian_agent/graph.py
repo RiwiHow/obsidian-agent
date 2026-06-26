@@ -14,9 +14,9 @@ class AgentState(TypedDict, total=False):
     question: str
     needs_tool: bool
     search_query: str
-    search_results: list[dict[str, str]]
+    search_results: list[dict[str, Any]]
     selected_files: list[str]
-    notes_content: list[dict[str, str]]
+    notes_content: list[dict[str, Any]]
     iterations: int
     final_answer: str
     messages: list[BaseMessage]
@@ -43,6 +43,8 @@ def build_graph(
     note_tools = create_note_tools(
         config.vault_path,
         max_results=config.search.max_results,
+        chunk_size=config.search.chunk_size,
+        chunk_overlap=config.search.chunk_overlap,
     )
     tool_by_name = {item.name: item for item in note_tools}
     llm = model or create_chat_model(config)
@@ -59,7 +61,7 @@ def build_graph(
         needs_tool = _looks_like_vault_question(question)
         if progress:
             if needs_tool:
-                progress("识别为笔记问题，准备搜索 Obsidian vault。")
+                progress("识别为笔记问题，准备从 Obsidian vault 检索相关片段。")
             else:
                 progress("识别为普通问题，直接生成回答。")
         return {
@@ -70,12 +72,12 @@ def build_graph(
 
     def search_node(state):
         if progress:
-            progress(f"正在搜索笔记：{state['search_query']}")
+            progress(f"正在进行 RAG 检索：{state['search_query']}")
         messages = [
             SystemMessage(
                 content=(
-                    "You search a local Obsidian vault. Call search_notes exactly once "
-                    "with the best concise keyword query for the user question."
+                    "You retrieve context from a local Obsidian vault. Call retrieve_notes exactly once "
+                    "with the best concise retrieval query for the user question."
                 )
             ),
             HumanMessage(content=state["search_query"]),
@@ -86,9 +88,9 @@ def build_graph(
         if not tool_calls:
             tool_calls = [
                 {
-                    "name": "search_notes",
+                    "name": "retrieve_notes",
                     "args": {"query": state["search_query"]},
-                    "id": "fallback-search",
+                    "id": "fallback-retrieve",
                 }
             ]
 
@@ -99,7 +101,7 @@ def build_graph(
         for call in tool_calls:
             name = call["name"]
             args = call.get("args") or {}
-            if name != "search_notes":
+            if name != "retrieve_notes":
                 continue
             result = tool_by_name[name].invoke(args)
             search_results = result
@@ -109,37 +111,28 @@ def build_graph(
         if progress:
             count = len(search_results)
             if count:
-                progress(f"找到 {count} 条相关笔记，准备读取内容。")
+                progress(f"召回 {count} 个相关片段，准备生成回答。")
             else:
-                progress("没有找到相关笔记，尝试调整查询。")
+                progress("没有召回相关片段，尝试调整查询。")
 
         return {
             "search_results": search_results,
-            "selected_files": [item["file_path"] for item in search_results],
+            "selected_files": [item["chunk_id"] for item in search_results],
             "iterations": state.get("iterations", 0) + 1,
             "messages": state.get("messages", []) + [response] + tool_messages,
             "tool_calls": state.get("tool_calls", []) + recorded_calls,
         }
 
     def read_node(state):
-        notes_content = []
-        recorded_calls = []
-        selected_files = state.get("selected_files", [])
-
         if progress:
-            if selected_files:
-                progress(f"正在读取 {len(selected_files)} 篇笔记。")
+            if state.get("search_results"):
+                progress("正在整理召回片段。")
             else:
-                progress("没有可读取的笔记，准备基于现有信息回答。")
-
-        for file_path in selected_files:
-            result = tool_by_name["read_note"].invoke({"file_path": file_path})
-            notes_content.append(result)
-            recorded_calls.append({"name": "read_note", "args": {"file_path": file_path}})
+                progress("没有可用片段，准备基于现有信息回答。")
 
         return {
-            "notes_content": notes_content,
-            "tool_calls": state.get("tool_calls", []) + recorded_calls,
+            "notes_content": state.get("search_results", []),
+            "tool_calls": state.get("tool_calls", []),
         }
 
     def summarize_node(state):
@@ -148,10 +141,10 @@ def build_graph(
         notes = state.get("notes_content", [])
         if notes:
             context = "\n\n".join(
-                f"## {note['file_path']}\n{note['content']}" for note in notes
+                f"## {note['chunk_id']} score={note['score']}\n{note['content']}" for note in notes
             )
             prompt = (
-                "请基于以下 Obsidian Markdown 笔记回答用户问题。"
+                "请基于以下从 Obsidian Markdown 笔记中 RAG 召回的片段回答用户问题。"
                 "输出结构化总结，注明依据来自哪些文件；如果信息不足，请直接说明。\n\n"
                 f"用户问题：{state['question']}\n\n笔记内容：\n{context}"
             )
