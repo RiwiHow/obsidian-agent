@@ -4,20 +4,22 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class ModelConfig(BaseModel):
     model_name: str = "deepseek-v4-flash"
     base_url: str = "https://api.deepseek.com"
-    api_key: str | None = None
+    api_key: SecretStr | None = None
     temperature: float = 0
 
-    @field_validator("api_key")
+    @field_validator("api_key", mode="before")
     @classmethod
-    def normalize_api_key(cls, value: str | None) -> str | None:
+    def normalize_api_key(cls, value):
         if value is None:
             return None
+        if isinstance(value, SecretStr):
+            return value
         value = value.strip()
         return value or None
 

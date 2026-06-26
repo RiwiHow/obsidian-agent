@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, TypedDict
+from typing import Any, Callable, TypedDict
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
@@ -24,7 +23,7 @@ class AgentState(TypedDict, total=False):
     tool_calls: list[dict[str, Any]]
 
 
-def create_chat_model(config: AppConfig) -> ChatOpenAI:
+def create_chat_model(config: AppConfig):
     return ChatOpenAI(
         model=config.model.model_name,
         base_url=config.model.base_url,
@@ -38,7 +37,7 @@ ProgressCallback = Callable[[str], None]
 
 def build_graph(
     config: AppConfig,
-    model: BaseChatModel | None = None,
+    model=None,
     progress: ProgressCallback | None = None,
 ):
     note_tools = create_note_tools(
@@ -49,7 +48,7 @@ def build_graph(
     llm = model or create_chat_model(config)
     llm_with_tools = llm.bind_tools(note_tools)
 
-    def classify_question(state: AgentState) -> dict[str, Any]:
+    def classify_question(state):
         question = state["question"]
         iterations = state.get("iterations", 0)
         search_query = state.get("search_query") or question
@@ -69,7 +68,7 @@ def build_graph(
             "iterations": iterations,
         }
 
-    def search_node(state: AgentState) -> dict[str, Any]:
+    def search_node(state):
         if progress:
             progress(f"正在搜索笔记：{state['search_query']}")
         messages = [
@@ -93,9 +92,9 @@ def build_graph(
                 }
             ]
 
-        search_results: list[dict[str, str]] = []
-        tool_messages: list[ToolMessage] = []
-        recorded_calls: list[dict[str, Any]] = []
+        search_results = []
+        tool_messages = []
+        recorded_calls = []
 
         for call in tool_calls:
             name = call["name"]
@@ -122,9 +121,9 @@ def build_graph(
             "tool_calls": state.get("tool_calls", []) + recorded_calls,
         }
 
-    def read_node(state: AgentState) -> dict[str, Any]:
-        notes_content: list[dict[str, str]] = []
-        recorded_calls: list[dict[str, Any]] = []
+    def read_node(state):
+        notes_content = []
+        recorded_calls = []
         selected_files = state.get("selected_files", [])
 
         if progress:
@@ -143,7 +142,7 @@ def build_graph(
             "tool_calls": state.get("tool_calls", []) + recorded_calls,
         }
 
-    def summarize_node(state: AgentState) -> dict[str, str]:
+    def summarize_node(state):
         if progress:
             progress("正在生成最终回答。")
         notes = state.get("notes_content", [])
@@ -166,10 +165,10 @@ def build_graph(
         response = llm.invoke([HumanMessage(content=prompt)])
         return {"final_answer": response.content}
 
-    def route_after_classify(state: AgentState) -> Literal["search_node", "summarize_node"]:
+    def route_after_classify(state):
         return "search_node" if state.get("needs_tool") else "summarize_node"
 
-    def route_after_search(state: AgentState) -> Literal["classify_question", "read_node"]:
+    def route_after_search(state):
         if (
             not state.get("search_results")
             and state.get("iterations", 0) < config.search.max_search_iterations
@@ -201,9 +200,9 @@ def build_graph(
 def run_agent(
     question: str,
     config: AppConfig,
-    model: BaseChatModel | None = None,
+    model=None,
     progress: ProgressCallback | None = None,
-) -> AgentState:
+):
     graph = build_graph(config, model=model, progress=progress)
     return graph.invoke(
         {
