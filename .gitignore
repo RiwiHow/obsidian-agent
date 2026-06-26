@@ -1,0 +1,8 @@
+.venv/
+.uv-cache/
+.tmp/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+config.yaml
